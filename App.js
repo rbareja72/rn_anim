@@ -14,7 +14,6 @@ const IMAGE_HEIGHT = screenHeight - 90;
 const {
   cond,
   eq,
-  and,
   add,
   greaterThan,
   set,
@@ -25,91 +24,97 @@ const {
   call,
   lessThan,
   sub,
-  max,
   divide,
+  block,
 } = Animated;
 
 const App = () => {
-  const baseScale = useValue(1);
+  // scale
+  const pinchGestureState = useValue(-1);
+  const pinchScale = useValue(1);
+  const pinchEvent = event([
+    {nativeEvent: {scale: pinchScale, state: pinchGestureState}},
+  ]);
+  const lastScale = useValue(1);
+  const scale = cond(
+    greaterThan(multiply(lastScale, pinchScale), 2),
+    block([set(lastScale, 2), set(pinchScale, 2)]),
+    cond(
+      lessThan(multiply(lastScale, pinchScale), 1),
+      block([set(lastScale, 1), set(pinchScale, 1)]),
+      set(lastScale, multiply(lastScale, pinchScale)),
+    ),
+  );
+
+  // drag events
   const offsetX = useValue(0);
   const offsetY = useValue(0);
   const dragX = useValue(0);
   const dragY = useValue(0);
-  const gestureState = useValue(-1);
-  const baseScaleValue = React.useRef(1);
-  call([baseScale], (baseScale) => {
-    baseScaleValue.current = baseScale;
-  });
-  const pinchScale = useValue(1);
-  const scale = multiply(baseScale, pinchScale);
-  const lastScale = React.useRef(1);
+  const panGestureState = useValue(-1);
+  const panEvent = event([
+    {
+      nativeEvent: {
+        translationX: dragX,
+        translationY: dragY,
+        state: panGestureState,
+      },
+    },
+  ]);
   const midTransX = cond(
-    eq(gestureState, State.ACTIVE),
+    eq(panGestureState, State.ACTIVE),
     add(offsetX, dragX),
     set(offsetX, add(offsetX, dragX)),
   );
   const translateX = cond(
-    lessThan(midTransX, divide(multiply(IMAGE_WIDTH, sub(scale, 1)), 2)), // (414 * (scale - 1)) / 2
-    midTransX,
-    set(offsetX, divide(multiply(IMAGE_WIDTH, sub(scale, 1)), 2)),
+    lessThan(midTransX, 0),
+    cond(
+      lessThan(
+        sub(0, divide(multiply(IMAGE_WIDTH, sub(scale, 1)), 2)),
+        midTransX,
+      ), // (414 * (scale - 1)) / 2
+      midTransX,
+      set(offsetX, sub(0, divide(multiply(IMAGE_WIDTH, sub(scale, 1)), 2))),
+    ),
+    cond(
+      lessThan(midTransX, divide(multiply(IMAGE_WIDTH, sub(scale, 1)), 2)), // (414 * (scale - 1)) / 2
+      midTransX,
+      set(offsetX, divide(multiply(IMAGE_WIDTH, sub(scale, 1)), 2)),
+    ),
   );
-  const minTransY = cond(
-    eq(gestureState, State.ACTIVE),
+  const midTransY = cond(
+    eq(panGestureState, State.ACTIVE),
     add(offsetY, dragY),
     set(offsetY, add(offsetY, dragY)),
   );
   const translateY = cond(
-    lessThan(minTransY, divide(multiply(IMAGE_HEIGHT, sub(scale, 1)), 2)), // (414 * (scale - 1)) / 2
-    minTransY,
-    set(offsetY, divide(multiply(IMAGE_HEIGHT, sub(scale, 1)), 2)),
+    lessThan(midTransY, 0),
+    cond(
+      lessThan(
+        sub(0, divide(multiply(IMAGE_HEIGHT, sub(scale, 1)), 2)),
+        midTransY,
+      ), // (414 * (scale - 1)) / 2
+      midTransY,
+      set(offsetY, sub(0, divide(multiply(IMAGE_HEIGHT, sub(scale, 1)), 2))),
+    ),
+    cond(
+      lessThan(midTransY, divide(multiply(IMAGE_HEIGHT, sub(scale, 1)), 2)), // (414 * (scale - 1)) / 2
+      midTransY,
+      set(offsetY, divide(multiply(IMAGE_HEIGHT, sub(scale, 1)), 2)),
+    ),
   );
-  const onHandlerStateChange = (event) => {
-    if (event.nativeEvent.oldState === State.ACTIVE) {
-      if (event.nativeEvent.scale < 1 && baseScaleValue.current <= 1) {
-        lastScale.current = 1;
-        baseScale.setValue(1);
-        baseScaleValue.current = 1;
-        pinchScale.setValue(1);
-      } else {
-        pinchScale.setValue(1);
-        if (lastScale.current * event.nativeEvent.scale > 2) {
-          lastScale.current = 2;
-        } else {
-          lastScale.current *= event.nativeEvent.scale;
-        }
-        baseScaleValue.current = lastScale.current;
-        baseScale.setValue(lastScale.current);
-      }
-    }
-  };
 
   return (
     <>
       <SafeAreaView style={styles.flex}>
         <PanGestureHandler
           maxPointers={1}
-          onGestureEvent={event([
-            {
-              nativeEvent: {
-                translationX: dragX,
-                translationY: dragY,
-                state: gestureState,
-              },
-            },
-          ])}
-          onHandlerStateChange={event([
-            {
-              nativeEvent: {
-                translationX: dragX,
-                translationY: dragY,
-                state: gestureState,
-              },
-            },
-          ])}>
+          onGestureEvent={panEvent}
+          onHandlerStateChange={panEvent}>
           <Animated.View style={styles.flex}>
             <PinchGestureHandler
-              onHandlerStateChange={onHandlerStateChange}
-              onGestureEvent={event([{nativeEvent: {scale: pinchScale}}])}>
+              onHandlerStateChange={pinchEvent}
+              onGestureEvent={pinchEvent}>
               <Image
                 source={require('./image.png')}
                 resizeMode={'stretch'}
@@ -126,6 +131,11 @@ const App = () => {
                 ]}
               />
             </PinchGestureHandler>
+            <Animated.Code>
+              {() =>
+                call([pinchScale], ([pinchScale]) => console.log(pinchScale))
+              }
+            </Animated.Code>
           </Animated.View>
         </PanGestureHandler>
       </SafeAreaView>
