@@ -26,24 +26,73 @@ const {
   sub,
   divide,
   block,
+  decay,
+  Clock,
+  and,
+  clockRunning,
+  stopClock,
+  Value,
+  startClock,
+  not,
+  neq,
 } = Animated;
 
+const withDecay = (config) => {
+  const {value, velocity, state, offset, deceleration} = {
+    offset: new Value(0),
+    deceleration: 0.998,
+    ...config,
+  };
+  const clock = new Clock();
+  const decayState = {
+    finished: new Value(0),
+    velocity: new Value(0),
+    position: new Value(0),
+    time: new Value(0),
+  };
+
+  const isDecayInterrupted = and(eq(state, State.BEGAN), clockRunning(clock));
+  const finishDecay = [set(offset, decayState.position), stopClock(clock)];
+
+  return block([
+    cond(isDecayInterrupted, finishDecay),
+    cond(neq(state, State.END), [
+      set(decayState.finished, 0),
+      set(decayState.position, add(offset, value)),
+    ]),
+    cond(eq(state, State.END), [
+      cond(and(not(clockRunning(clock)), not(decayState.finished)), [
+        set(decayState.velocity, velocity),
+        set(decayState.time, 0),
+        startClock(clock),
+      ]),
+      decay(clock, decayState, {deceleration}),
+      cond(decayState.finished, finishDecay),
+    ]),
+    decayState.position,
+  ]);
+};
 const App = () => {
   // scale
   const pinchGestureState = useValue(-1);
   const pinchScale = useValue(1);
-  const pinchEvent = event([
-    {nativeEvent: {scale: pinchScale, state: pinchGestureState}},
-  ]);
+  const pinchEvent = event(
+    [{nativeEvent: {scale: pinchScale, state: pinchGestureState}}],
+    {useNativeDriver: true},
+  );
   const lastScale = useValue(1);
   const scale = cond(
-    greaterThan(multiply(lastScale, pinchScale), 2),
-    block([set(lastScale, 2), set(pinchScale, 2)]),
+    eq(pinchGestureState, State.ACTIVE),
     cond(
-      lessThan(multiply(lastScale, pinchScale), 1),
-      block([set(lastScale, 1), set(pinchScale, 1)]),
-      set(lastScale, multiply(lastScale, pinchScale)),
+      greaterThan(multiply(lastScale, pinchScale), 2),
+      [set(lastScale, 2)],
+      cond(
+        lessThan(multiply(lastScale, pinchScale), 1),
+        [set(lastScale, 1)],
+        [set(lastScale, multiply(lastScale, pinchScale))],
+      ),
     ),
+    lastScale,
   );
 
   // drag events
@@ -51,21 +100,29 @@ const App = () => {
   const offsetY = useValue(0);
   const dragX = useValue(0);
   const dragY = useValue(0);
+  const velocityX = useValue(0);
+  const velocityY = useValue(0);
   const panGestureState = useValue(-1);
-  const panEvent = event([
-    {
-      nativeEvent: {
-        translationX: dragX,
-        translationY: dragY,
-        state: panGestureState,
+  const panEvent = event(
+    [
+      {
+        nativeEvent: {
+          translationX: dragX,
+          translationY: dragY,
+          state: panGestureState,
+          velocityX,
+          velocityY,
+        },
       },
-    },
-  ]);
-  const midTransX = cond(
-    eq(panGestureState, State.ACTIVE),
-    add(offsetX, dragX),
-    set(offsetX, add(offsetX, dragX)),
+    ],
+    {useNativeDriver: true},
   );
+
+  const midTransX = withDecay({
+    value: dragX,
+    velocity: velocityX,
+    state: panGestureState,
+  });
   const translateX = cond(
     lessThan(midTransX, 0),
     cond(
@@ -82,11 +139,19 @@ const App = () => {
       set(offsetX, divide(multiply(IMAGE_WIDTH, sub(scale, 1)), 2)),
     ),
   );
-  const midTransY = cond(
-    eq(panGestureState, State.ACTIVE),
-    add(offsetY, dragY),
-    set(offsetY, add(offsetY, dragY)),
-  );
+  // without animation
+  // const midTransY = cond(
+  //   eq(panGestureState, State.ACTIVE),
+  //   add(offsetY, dragY),
+  //   set(offsetY, add(offsetY, dragY)),
+  // );
+
+  //with animation
+  const midTransY = withDecay({
+    value: dragY,
+    velocity: velocityY,
+    state: panGestureState,
+  });
   const translateY = cond(
     lessThan(midTransY, 0),
     cond(
@@ -113,6 +178,7 @@ const App = () => {
           onHandlerStateChange={panEvent}>
           <Animated.View style={styles.flex}>
             <PinchGestureHandler
+              minPointers={2}
               onHandlerStateChange={pinchEvent}
               onGestureEvent={pinchEvent}>
               <Image
@@ -131,11 +197,6 @@ const App = () => {
                 ]}
               />
             </PinchGestureHandler>
-            <Animated.Code>
-              {() =>
-                call([pinchScale], ([pinchScale]) => console.log(pinchScale))
-              }
-            </Animated.Code>
           </Animated.View>
         </PanGestureHandler>
       </SafeAreaView>
